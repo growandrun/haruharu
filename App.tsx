@@ -42,6 +42,8 @@ import {
 import React, { useEffect, useMemo, useState } from "react";
 import { analyzeDay } from "./src/services/ai";
 import {
+  getDemoVerificationCode,
+  isDemoMode,
   login as loginRequest,
   logout as logoutRequest,
   requestPayment as requestPaymentRequest,
@@ -484,17 +486,16 @@ function AppShell() {
   }
 
   async function confirmEmailCode() {
-    if (!settings.authToken) return;
     const code = emailCode.trim();
 
     if (!code) {
-      Alert.alert("인증 코드를 입력해 주세요", "서버 로그 또는 이메일로 받은 6자리 코드를 입력해야 합니다.");
+      Alert.alert("인증 코드를 입력해 주세요", "이메일로 받은 6자리 코드를 입력해야 합니다.");
       return;
     }
 
     setVerifySubmitting(true);
     try {
-      const serverSettings = await verifyEmail(settings.authToken, code);
+      const serverSettings = await verifyEmail(settings.authToken, code, settings.email);
       await updateSettings({ ...mergeServerSettings(serverSettings), signupEmailVerificationPending: false });
       setEmailCode("");
       setResendCooldownSeconds(0);
@@ -507,14 +508,18 @@ function AppShell() {
   }
 
   async function resendEmailCode() {
-    if (!settings.authToken) return;
     if (resendCooldownSeconds > 0) return;
 
     setResendSubmitting(true);
     try {
-      await resendVerification(settings.authToken);
+      await resendVerification(settings.authToken, settings.email);
       setResendCooldownSeconds(60);
-      Alert.alert("인증 코드를 다시 보냈어요", "현재 개발 환경에서는 서버 로그에서 인증 코드를 확인할 수 있습니다.");
+      Alert.alert(
+        "인증 코드를 다시 보냈어요",
+        isDemoMode()
+          ? "데모 환경에서는 화면에 표시된 코드만 유효합니다."
+          : "이메일을 확인해 주세요. 메일이 보이지 않으면 스팸 메일함도 확인해 주세요."
+      );
     } catch (error) {
       Alert.alert("재전송 실패", error instanceof Error ? error.message : "인증 코드를 다시 만들지 못했습니다.");
     } finally {
@@ -736,6 +741,7 @@ function AppShell() {
               verifySubmitting={verifySubmitting}
               resendSubmitting={resendSubmitting}
               resendCooldownSeconds={resendCooldownSeconds}
+              demoCode={isDemoMode() ? getDemoVerificationCode() : null}
             />
           </ScrollView>
         </KeyboardAvoidingView>
@@ -1026,7 +1032,8 @@ function VerifyEmailScreen({
   onLogout,
   verifySubmitting,
   resendSubmitting,
-  resendCooldownSeconds
+  resendCooldownSeconds,
+  demoCode
 }: {
   email: string;
   code: string;
@@ -1037,6 +1044,7 @@ function VerifyEmailScreen({
   verifySubmitting: boolean;
   resendSubmitting: boolean;
   resendCooldownSeconds: number;
+  demoCode: string | null;
 }) {
   const resendDisabled = resendSubmitting || resendCooldownSeconds > 0;
 
@@ -1049,6 +1057,19 @@ function VerifyEmailScreen({
       <Text style={styles.authSubtitle}>
         {email} 계정을 보호하기 위해 6자리 인증 코드 확인이 필요합니다.
       </Text>
+
+      {demoCode ? (
+        <View style={styles.demoNoticeCard}>
+          <Text style={styles.demoNoticeTitle}>데모 환경 안내</Text>
+          <Text style={styles.demoNoticeText}>
+            인증 서버가 연결되지 않은 데모 빌드입니다. 실제 메일은 발송되지 않으며, 아래 코드를 그대로 입력해 주세요.
+          </Text>
+          <Text style={styles.demoNoticeCode}>{demoCode}</Text>
+          <Text style={styles.demoNoticeText}>
+            정식 배포에서는 이메일로 받은 6자리 코드만 통과합니다. 임의 코드 입력은 거부됩니다.
+          </Text>
+        </View>
+      ) : null}
 
       <View style={styles.authCard}>
         <Text style={styles.authCardTitle}>인증 코드 입력</Text>
@@ -1065,7 +1086,9 @@ function VerifyEmailScreen({
           />
         </View>
         <Text style={styles.authRuleText}>
-          개발 환경에서는 인증 코드가 서버 로그에 표시됩니다. 운영 배포 전에는 이메일 발송 서비스와 연결해야 합니다.
+          {demoCode
+            ? "위에 표시된 데모 코드를 그대로 입력하면 인증이 완료됩니다."
+            : "이메일로 받은 6자리 코드를 입력해 주세요. 5회 이상 틀리면 코드가 무효화됩니다."}
         </Text>
         <Pressable
           accessibilityRole="button"
@@ -1929,6 +1952,36 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.line
+  },
+  demoNoticeCard: {
+    marginTop: spacing.md,
+    padding: spacing.lg,
+    gap: spacing.sm,
+    backgroundColor: "#FEF3C7",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#F59E0B"
+  },
+  demoNoticeTitle: {
+    color: "#92400E",
+    fontSize: 15,
+    fontFamily: font.extraBold,
+    fontWeight: "900"
+  },
+  demoNoticeText: {
+    color: "#78350F",
+    fontSize: 13,
+    fontFamily: font.regular,
+    lineHeight: 18
+  },
+  demoNoticeCode: {
+    color: "#7C2D12",
+    fontSize: 32,
+    fontFamily: font.extraBold,
+    fontWeight: "900",
+    letterSpacing: 6,
+    textAlign: "center",
+    paddingVertical: spacing.sm
   },
   authCardTitle: {
     color: colors.ink,
