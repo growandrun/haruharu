@@ -1,0 +1,43 @@
+{
+  "name": "haru-jeongri",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "build": "expo export --platform web",
+    "vercel-build": "expo export --platform web",
+    "ai:server": "node server/ai-server.mjs",
+    "dev:ai": "node scripts/start-dev-ai.mjs",
+    "typecheck": "tsc --noEmit",
+    "build:android": "npx eas-cli build --platform android --profile production",
+    "build:apk": "npx eas-cli build --platform android --profile preview",
+    "build:ios": "npx eas-cli build --platform ios --profile production",
+    "build:all": "npx eas-cli build --platform all --profile production",
+    "submit:android": "npx eas-cli submit --platform android --profile production",
+    "submit:ios": "npx eas-cli submit --platform ios --profile production",
+    "submit:all": "npx eas-cli submit --platform all --profile production"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~55.0.20",
+    "expo-font": "~55.0.6",
+    "expo-linear-gradient": "~55.0.13",
+    "expo-notifications": "~55.0.7",
+    "expo-status-bar": "~55.0.5",
+    "lucide-react-native": "^0.540.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-native": "0.83.6",
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-svg": "15.15.3",
+    "react-native-web": "~0.21.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "typescript": "^5.9.2"
+  }
+}
