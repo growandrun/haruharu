@@ -407,15 +407,24 @@ function AppShell() {
 
     setAuthSubmitting(true);
     try {
-      await signupRequest(name, email, password);
-      setLoginName("");
-      setLoginEmail(email);
+      const serverSettings = await signupRequest(name, email, password);
       setLoginPassword("");
       setPasswordConfirm("");
+      setEmailCode("");
       setResendCooldownSeconds(0);
-      setAuthMode("login");
-      setAuthNotice("가입 성공! 이제 이메일과 비밀번호로 로그인해 주세요.");
-      Alert.alert("가입 성공", "회원가입이 완료되었습니다. 이제 이메일과 비밀번호로 로그인해 주세요.");
+      setAuthNotice("");
+      setDraftName(serverSettings.displayName);
+      setDraftEmail(serverSettings.email);
+
+      if (serverSettings.signupEmailVerificationPending && !serverSettings.emailVerified) {
+        await updateSettings({ ...defaultSettings, ...serverSettings });
+      } else {
+        setLoginName("");
+        setLoginEmail(serverSettings.email);
+        setAuthMode("login");
+        setAuthNotice("가입 성공! 이제 이메일과 비밀번호로 로그인해 주세요.");
+        Alert.alert("가입 성공", "회원가입이 완료되었습니다. 이제 이메일과 비밀번호로 로그인해 주세요.");
+      }
     } catch (error) {
       Alert.alert("회원가입 실패", error instanceof Error ? error.message : "회원가입을 처리하지 못했습니다.");
     } finally {
