@@ -42,10 +42,13 @@ import {
 import React, { useEffect, useMemo, useState } from "react";
 import { analyzeDay } from "./src/services/ai";
 import {
+  AuthError,
+  confirmPasswordReset as confirmPasswordResetRequest,
   getDemoVerificationCode,
   isDemoMode,
   login as loginRequest,
   logout as logoutRequest,
+  requestPasswordReset as requestPasswordResetCode,
   requestPayment as requestPaymentRequest,
   resendVerification,
   signup as signupRequest,
@@ -317,15 +320,21 @@ function AppShell() {
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
-  const [authMode, setAuthMode] = useState<"signup" | "login">("signup");
+  const [authStage, setAuthStage] = useState<"signup" | "login" | "forgot_request" | "forgot_confirm">("signup");
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authNotice, setAuthNotice] = useState("");
+  const [authError, setAuthError] = useState("");
   const [verifySubmitting, setVerifySubmitting] = useState(false);
   const [resendSubmitting, setResendSubmitting] = useState(false);
   const [resendCooldownSeconds, setResendCooldownSeconds] = useState(0);
   const [checkoutTier, setCheckoutTier] = useState<SubscriptionTier | null>(null);
   const [depositorName, setDepositorName] = useState("");
   const [emailCode, setEmailCode] = useState("");
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [resetNewPassword, setResetNewPassword] = useState("");
+  const [resetNewPasswordConfirm, setResetNewPasswordConfirm] = useState("");
+  const [demoVerificationCode, setDemoVerificationCode] = useState<string | null>(null);
 
   useEffect(() => {
     async function boot() {
@@ -350,6 +359,29 @@ function AppShell() {
     }, 1000);
     return () => clearInterval(timer);
   }, [resendCooldownSeconds]);
+
+  useEffect(() => {
+    if (!isDemoMode()) {
+      setDemoVerificationCode(null);
+      return;
+    }
+    const target = authStage === "forgot_confirm" ? resetEmail : settings.email;
+    if (!target) {
+      setDemoVerificationCode(null);
+      return;
+    }
+    let cancelled = false;
+    getDemoVerificationCode(target)
+      .then((code) => {
+        if (!cancelled) setDemoVerificationCode(code);
+      })
+      .catch(() => {
+        if (!cancelled) setDemoVerificationCode(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authStage, resetEmail, settings.email, settings.signupEmailVerificationPending, settings.emailVerified]);
 
   const latestRecord = records[0];
   const todayRecords = useMemo(() => recordsForDate(records), [records]);
@@ -395,15 +427,20 @@ function AppShell() {
   async function signup() {
     const name = loginName.trim();
     const email = loginEmail.trim();
-    const password = loginPassword.trim();
+    const password = loginPassword;
 
-    if (!name || !email.includes("@")) {
-      Alert.alert("로그인이 필요해요", "이름과 이메일을 입력하면 이 기기에 계정이 저장됩니다.");
+    setAuthError("");
+
+    if (!name) {
+      setAuthError("이름을 입력해 주세요.");
       return;
     }
-
-    if (password !== passwordConfirm.trim()) {
-      Alert.alert("비밀번호 확인", "비밀번호와 확인 값이 다릅니다.");
+    if (!email) {
+      setAuthError("이메일을 입력해 주세요.");
+      return;
+    }
+    if (password !== passwordConfirm) {
+      setAuthError("비밀번호와 비밀번호 확인이 일치하지 않습니다.");
       return;
     }
 
@@ -423,12 +460,11 @@ function AppShell() {
       } else {
         setLoginName("");
         setLoginEmail(serverSettings.email);
-        setAuthMode("login");
-        setAuthNotice("가입 성공! 이제 이메일과 비밀번호로 로그인해 주세요.");
-        Alert.alert("가입 성공", "회원가입이 완료되었습니다. 이제 이메일과 비밀번호로 로그인해 주세요.");
+        setAuthStage("login");
+        setAuthNotice("가입이 완료되었습니다. 로그인해 주세요.");
       }
     } catch (error) {
-      Alert.alert("회원가입 실패", error instanceof Error ? error.message : "회원가입을 처리하지 못했습니다.");
+      setAuthError(authErrorToMessage(error, "회원가입을 처리하지 못했습니다."));
     } finally {
       setAuthSubmitting(false);
     }
@@ -436,10 +472,16 @@ function AppShell() {
 
   async function login() {
     const email = loginEmail.trim();
-    const password = loginPassword.trim();
+    const password = loginPassword;
 
-    if (!email.includes("@") || !password) {
-      Alert.alert("로그인이 필요해요", "이메일과 비밀번호를 입력해 주세요.");
+    setAuthError("");
+
+    if (!email) {
+      setAuthError("이메일을 입력해 주세요.");
+      return;
+    }
+    if (!password) {
+      setAuthError("비밀번호를 입력해 주세요.");
       return;
     }
 
@@ -457,7 +499,72 @@ function AppShell() {
       setResendCooldownSeconds(0);
       await updateSettings(nextSettings);
     } catch (error) {
-      Alert.alert("로그인 실패", error instanceof Error ? error.message : "로그인을 처리하지 못했습니다.");
+      if (error instanceof AuthError && error.code === "email_not_verified") {
+        setAuthError(error.message);
+        setAuthStage("login");
+        Alert.alert(
+          "이메일 인증 필요",
+          "회원가입 시 받은 인증 코드를 입력해 주세요. 코드를 받지 못했다면 비밀번호 찾기로 새 코드를 받을 수 있습니다."
+        );
+      } else {
+        setAuthError(authErrorToMessage(error, "로그인을 처리하지 못했습니다."));
+      }
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }
+
+  async function submitForgotRequest() {
+    const email = resetEmail.trim();
+    setAuthError("");
+
+    if (!email) {
+      setAuthError("이메일을 입력해 주세요.");
+      return;
+    }
+
+    setAuthSubmitting(true);
+    try {
+      await requestPasswordResetCode(email);
+      setAuthStage("forgot_confirm");
+      setAuthNotice(
+        isDemoMode()
+          ? "재설정 코드가 발급되었습니다. 화면에 표시된 코드를 입력해 주세요."
+          : "재설정 코드를 이메일로 보냈습니다. 메일함을 확인해 주세요."
+      );
+      setResetCode("");
+      setResetNewPassword("");
+      setResetNewPasswordConfirm("");
+    } catch (error) {
+      setAuthError(authErrorToMessage(error, "재설정 코드를 보내지 못했습니다."));
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }
+
+  async function submitForgotConfirm() {
+    setAuthError("");
+    if (resetNewPassword !== resetNewPasswordConfirm) {
+      setAuthError("새 비밀번호와 확인이 일치하지 않습니다.");
+      return;
+    }
+
+    setAuthSubmitting(true);
+    try {
+      const serverSettings = await confirmPasswordResetRequest(resetEmail.trim(), resetCode, resetNewPassword);
+      const nextSettings = { ...defaultSettings, ...serverSettings, signupEmailVerificationPending: false };
+      setLoginEmail(nextSettings.email);
+      setDraftName(nextSettings.displayName);
+      setDraftEmail(nextSettings.email);
+      setResetEmail("");
+      setResetCode("");
+      setResetNewPassword("");
+      setResetNewPasswordConfirm("");
+      setAuthStage("login");
+      setAuthNotice("비밀번호가 변경되었습니다. 새 비밀번호로 자동 로그인됩니다.");
+      await updateSettings(nextSettings);
+    } catch (error) {
+      setAuthError(authErrorToMessage(error, "비밀번호 재설정에 실패했습니다."));
     } finally {
       setAuthSubmitting(false);
     }
@@ -478,11 +585,22 @@ function AppShell() {
     setLoginEmail("");
     setLoginPassword("");
     setPasswordConfirm("");
-    setAuthMode("signup");
+    setAuthStage("login");
     setAuthNotice("");
+    setAuthError("");
+    setResetEmail("");
+    setResetCode("");
+    setResetNewPassword("");
+    setResetNewPasswordConfirm("");
     setDraftName("");
     setDraftEmail("");
     setActiveTab("home");
+  }
+
+  function authErrorToMessage(error: unknown, fallback: string): string {
+    if (error instanceof AuthError) return error.message;
+    if (error instanceof Error) return error.message;
+    return fallback;
   }
 
   async function confirmEmailCode() {
@@ -700,25 +818,69 @@ function AppShell() {
         <StatusBar style="dark" />
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.keyboard}>
           <ScrollView contentContainerStyle={styles.authContent} showsVerticalScrollIndicator={false}>
-            <LoginScreen
-              mode={authMode}
-              name={loginName}
-              email={loginEmail}
-              password={loginPassword}
-              passwordConfirm={passwordConfirm}
-              notice={authNotice}
-              setMode={(mode) => {
-                setAuthMode(mode);
-                setAuthNotice("");
-              }}
-              setName={setLoginName}
-              setEmail={setLoginEmail}
-              setPassword={setLoginPassword}
-              setPasswordConfirm={setPasswordConfirm}
-              onSignup={signup}
-              onLogin={login}
-              submitting={authSubmitting}
-            />
+            {authStage === "forgot_request" ? (
+              <ForgotPasswordRequestScreen
+                email={resetEmail}
+                setEmail={setResetEmail}
+                notice={authNotice}
+                error={authError}
+                onSubmit={submitForgotRequest}
+                onBack={() => {
+                  setAuthStage("login");
+                  setAuthError("");
+                  setAuthNotice("");
+                }}
+                submitting={authSubmitting}
+              />
+            ) : authStage === "forgot_confirm" ? (
+              <ForgotPasswordConfirmScreen
+                email={resetEmail}
+                code={resetCode}
+                setCode={setResetCode}
+                newPassword={resetNewPassword}
+                setNewPassword={setResetNewPassword}
+                newPasswordConfirm={resetNewPasswordConfirm}
+                setNewPasswordConfirm={setResetNewPasswordConfirm}
+                notice={authNotice}
+                error={authError}
+                demoCode={demoVerificationCode}
+                onSubmit={submitForgotConfirm}
+                onBack={() => {
+                  setAuthStage("forgot_request");
+                  setAuthError("");
+                  setAuthNotice("");
+                }}
+                submitting={authSubmitting}
+              />
+            ) : (
+              <LoginScreen
+                mode={authStage === "signup" ? "signup" : "login"}
+                name={loginName}
+                email={loginEmail}
+                password={loginPassword}
+                passwordConfirm={passwordConfirm}
+                notice={authNotice}
+                error={authError}
+                setMode={(mode) => {
+                  setAuthStage(mode);
+                  setAuthNotice("");
+                  setAuthError("");
+                }}
+                setName={setLoginName}
+                setEmail={setLoginEmail}
+                setPassword={setLoginPassword}
+                setPasswordConfirm={setPasswordConfirm}
+                onSignup={signup}
+                onLogin={login}
+                onForgotPassword={() => {
+                  setAuthStage("forgot_request");
+                  setAuthError("");
+                  setAuthNotice("");
+                  setResetEmail(loginEmail);
+                }}
+                submitting={authSubmitting}
+              />
+            )}
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -741,7 +903,7 @@ function AppShell() {
               verifySubmitting={verifySubmitting}
               resendSubmitting={resendSubmitting}
               resendCooldownSeconds={resendCooldownSeconds}
-              demoCode={isDemoMode() ? getDemoVerificationCode() : null}
+              demoCode={demoVerificationCode}
             />
           </ScrollView>
         </KeyboardAvoidingView>
@@ -827,6 +989,7 @@ function LoginScreen({
   password,
   passwordConfirm,
   notice,
+  error,
   setMode,
   setName,
   setEmail,
@@ -834,6 +997,7 @@ function LoginScreen({
   setPasswordConfirm,
   onSignup,
   onLogin,
+  onForgotPassword,
   submitting
 }: {
   mode: "signup" | "login";
@@ -842,6 +1006,7 @@ function LoginScreen({
   password: string;
   passwordConfirm: string;
   notice: string;
+  error: string;
   setMode: (value: "signup" | "login") => void;
   setName: (value: string) => void;
   setEmail: (value: string) => void;
@@ -849,6 +1014,7 @@ function LoginScreen({
   setPasswordConfirm: (value: string) => void;
   onSignup: () => void;
   onLogin: () => void;
+  onForgotPassword: () => void;
   submitting: boolean;
 }) {
   const isSignup = mode === "signup";
@@ -896,6 +1062,11 @@ function LoginScreen({
             <Text style={styles.authNoticeText}>{notice}</Text>
           </View>
         ) : null}
+        {error ? (
+          <View style={styles.authErrorBox}>
+            <Text style={styles.authErrorText}>{error}</Text>
+          </View>
+        ) : null}
         <Text style={styles.authCardTitle}>{isSignup ? "보안 계정 만들기" : "다시 로그인"}</Text>
         {isSignup ? (
           <View style={styles.authInputRow}>
@@ -905,6 +1076,8 @@ function LoginScreen({
               onChangeText={setName}
               placeholder="이름"
               placeholderTextColor={colors.subtle}
+              autoCapitalize="words"
+              maxLength={40}
               style={styles.authInput}
             />
           </View>
@@ -918,6 +1091,8 @@ function LoginScreen({
             placeholderTextColor={colors.subtle}
             keyboardType="email-address"
             autoCapitalize="none"
+            autoComplete="email"
+            textContentType="emailAddress"
             style={styles.authInput}
           />
         </View>
@@ -929,7 +1104,8 @@ function LoginScreen({
             placeholder="비밀번호"
             placeholderTextColor={colors.subtle}
             secureTextEntry
-            textContentType="password"
+            textContentType={isSignup ? "newPassword" : "password"}
+            autoComplete={isSignup ? "new-password" : "current-password"}
             autoCapitalize="none"
             style={styles.authInput}
           />
@@ -944,12 +1120,13 @@ function LoginScreen({
                 placeholder="비밀번호 확인"
                 placeholderTextColor={colors.subtle}
                 secureTextEntry
-                textContentType="password"
+                textContentType="newPassword"
+                autoComplete="new-password"
                 autoCapitalize="none"
                 style={styles.authInput}
               />
             </View>
-            <Text style={styles.authRuleText}>10자 이상, 대소문자, 숫자, 특수문자를 모두 포함해야 합니다.</Text>
+            <Text style={styles.authRuleText}>10자 이상, 영문 대소문자·숫자·특수문자를 모두 포함해야 합니다.</Text>
           </>
         ) : null}
         <Pressable
@@ -960,6 +1137,213 @@ function LoginScreen({
         >
           {submitting ? <ActivityIndicator color={colors.surface} /> : <Lock size={18} color={colors.surface} />}
           <Text style={styles.primaryButtonText}>{submitting ? "처리 중" : isSignup ? "회원가입" : "로그인"}</Text>
+        </Pressable>
+        {!isSignup ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={onForgotPassword}
+            disabled={submitting}
+            style={({ pressed }) => [styles.linkButton, pressed && styles.buttonPressed]}
+          >
+            <Text style={styles.linkButtonText}>비밀번호를 잊으셨나요?</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function ForgotPasswordRequestScreen({
+  email,
+  setEmail,
+  notice,
+  error,
+  onSubmit,
+  onBack,
+  submitting
+}: {
+  email: string;
+  setEmail: (value: string) => void;
+  notice: string;
+  error: string;
+  onSubmit: () => void;
+  onBack: () => void;
+  submitting: boolean;
+}) {
+  return (
+    <View style={styles.authScreen}>
+      <View style={styles.authBrandMark}>
+        <ShieldCheck size={28} color={colors.surface} />
+      </View>
+      <Text style={styles.authTitle}>비밀번호 재설정</Text>
+      <Text style={styles.authSubtitle}>가입한 이메일을 입력하면 6자리 인증 코드를 보내드립니다.</Text>
+
+      <View style={styles.authCard}>
+        {notice ? (
+          <View style={styles.authNotice}>
+            <Check size={16} color={colors.forestDark} />
+            <Text style={styles.authNoticeText}>{notice}</Text>
+          </View>
+        ) : null}
+        {error ? (
+          <View style={styles.authErrorBox}>
+            <Text style={styles.authErrorText}>{error}</Text>
+          </View>
+        ) : null}
+        <Text style={styles.authCardTitle}>이메일 확인</Text>
+        <View style={styles.authInputRow}>
+          <ShieldCheck size={18} color={colors.forestDark} />
+          <TextInput
+            value={email}
+            onChangeText={setEmail}
+            placeholder="이메일"
+            placeholderTextColor={colors.subtle}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoComplete="email"
+            textContentType="emailAddress"
+            style={styles.authInput}
+          />
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          disabled={submitting}
+          onPress={onSubmit}
+          style={({ pressed }) => [styles.primaryButton, pressed && styles.buttonPressed, submitting && styles.buttonDisabled]}
+        >
+          {submitting ? <ActivityIndicator color={colors.surface} /> : <Check size={18} color={colors.surface} />}
+          <Text style={styles.primaryButtonText}>{submitting ? "전송 중" : "재설정 코드 받기"}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onBack}
+          disabled={submitting}
+          style={({ pressed }) => [styles.linkButton, pressed && styles.buttonPressed]}
+        >
+          <Text style={styles.linkButtonText}>로그인으로 돌아가기</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function ForgotPasswordConfirmScreen({
+  email,
+  code,
+  setCode,
+  newPassword,
+  setNewPassword,
+  newPasswordConfirm,
+  setNewPasswordConfirm,
+  notice,
+  error,
+  demoCode,
+  onSubmit,
+  onBack,
+  submitting
+}: {
+  email: string;
+  code: string;
+  setCode: (value: string) => void;
+  newPassword: string;
+  setNewPassword: (value: string) => void;
+  newPasswordConfirm: string;
+  setNewPasswordConfirm: (value: string) => void;
+  notice: string;
+  error: string;
+  demoCode: string | null;
+  onSubmit: () => void;
+  onBack: () => void;
+  submitting: boolean;
+}) {
+  return (
+    <View style={styles.authScreen}>
+      <View style={styles.authBrandMark}>
+        <Lock size={28} color={colors.surface} />
+      </View>
+      <Text style={styles.authTitle}>새 비밀번호 설정</Text>
+      <Text style={styles.authSubtitle}>{email} 계정의 비밀번호를 새로 만들어 주세요.</Text>
+
+      {demoCode ? (
+        <View style={styles.demoNoticeCard}>
+          <Text style={styles.demoNoticeTitle}>데모 환경 안내</Text>
+          <Text style={styles.demoNoticeText}>
+            인증 서버가 연결되지 않은 데모 빌드입니다. 실제 메일은 발송되지 않으며, 아래 코드를 입력해 주세요.
+          </Text>
+          <Text style={styles.demoNoticeCode}>{demoCode}</Text>
+        </View>
+      ) : null}
+
+      <View style={styles.authCard}>
+        {notice ? (
+          <View style={styles.authNotice}>
+            <Check size={16} color={colors.forestDark} />
+            <Text style={styles.authNoticeText}>{notice}</Text>
+          </View>
+        ) : null}
+        {error ? (
+          <View style={styles.authErrorBox}>
+            <Text style={styles.authErrorText}>{error}</Text>
+          </View>
+        ) : null}
+        <Text style={styles.authCardTitle}>인증 코드와 새 비밀번호</Text>
+        <View style={styles.authInputRow}>
+          <Lock size={18} color={colors.forestDark} />
+          <TextInput
+            value={code}
+            onChangeText={(value) => setCode(value.replace(/\D/g, "").slice(0, 6))}
+            placeholder="6자리 인증 코드"
+            placeholderTextColor={colors.subtle}
+            keyboardType="number-pad"
+            maxLength={6}
+            style={styles.authInput}
+          />
+        </View>
+        <View style={styles.authInputRow}>
+          <Lock size={18} color={colors.forestDark} />
+          <TextInput
+            value={newPassword}
+            onChangeText={setNewPassword}
+            placeholder="새 비밀번호"
+            placeholderTextColor={colors.subtle}
+            secureTextEntry
+            textContentType="newPassword"
+            autoComplete="new-password"
+            autoCapitalize="none"
+            style={styles.authInput}
+          />
+        </View>
+        <View style={styles.authInputRow}>
+          <Lock size={18} color={colors.forestDark} />
+          <TextInput
+            value={newPasswordConfirm}
+            onChangeText={setNewPasswordConfirm}
+            placeholder="새 비밀번호 확인"
+            placeholderTextColor={colors.subtle}
+            secureTextEntry
+            textContentType="newPassword"
+            autoComplete="new-password"
+            autoCapitalize="none"
+            style={styles.authInput}
+          />
+        </View>
+        <Text style={styles.authRuleText}>10자 이상, 영문 대소문자·숫자·특수문자를 모두 포함해야 합니다.</Text>
+        <Pressable
+          accessibilityRole="button"
+          disabled={submitting}
+          onPress={onSubmit}
+          style={({ pressed }) => [styles.primaryButton, pressed && styles.buttonPressed, submitting && styles.buttonDisabled]}
+        >
+          {submitting ? <ActivityIndicator color={colors.surface} /> : <Check size={18} color={colors.surface} />}
+          <Text style={styles.primaryButtonText}>{submitting ? "변경 중" : "비밀번호 변경"}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onBack}
+          disabled={submitting}
+          style={({ pressed }) => [styles.linkButton, pressed && styles.buttonPressed]}
+        >
+          <Text style={styles.linkButtonText}>이전 단계로</Text>
         </Pressable>
       </View>
     </View>
@@ -2034,6 +2418,34 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontFamily: font.extraBold,
     fontWeight: "900"
+  },
+  authErrorBox: {
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: 8,
+    backgroundColor: "#FEE2E2",
+    borderWidth: 1,
+    borderColor: "#F87171"
+  },
+  authErrorText: {
+    color: "#991B1B",
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: font.extraBold,
+    fontWeight: "900"
+  },
+  linkButton: {
+    alignSelf: "center",
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md
+  },
+  linkButtonText: {
+    color: colors.forestDark,
+    fontSize: 13,
+    fontFamily: font.semibold,
+    fontWeight: "700",
+    textDecorationLine: "underline"
   },
   authInputRow: {
     minHeight: 56,
