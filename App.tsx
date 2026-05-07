@@ -40,6 +40,7 @@ import {
   UserRound
 } from "lucide-react-native";
 import React, { useEffect, useMemo, useState } from "react";
+import { AdminScreen } from "./src/screens/AdminScreen";
 import { analyzeDay } from "./src/services/ai";
 import {
   AuthError,
@@ -2248,6 +2249,24 @@ function Divider() {
 }
 
 export default function App() {
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setIsAdmin(window.location.pathname === "/admin");
+    }
+  }, []);
+
+  if (isAdmin) {
+    return (
+      <SafeAreaProvider>
+        <SafeAreaView style={{ flex: 1, backgroundColor: "#F5F8FA" }}>
+          <AdminScreen />
+        </SafeAreaView>
+      </SafeAreaProvider>
+    );
+  }
+
   return (
     <SafeAreaProvider>
       <AppShell />
