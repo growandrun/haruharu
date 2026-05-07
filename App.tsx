@@ -44,8 +44,6 @@ import { analyzeDay } from "./src/services/ai";
 import {
   AuthError,
   confirmPasswordReset as confirmPasswordResetRequest,
-  getDemoVerificationCode,
-  isDemoMode,
   login as loginRequest,
   logout as logoutRequest,
   requestPasswordReset as requestPasswordResetCode,
@@ -97,6 +95,16 @@ const releaseLinks = {
 };
 
 const appVersion = "0.1.0";
+
+function formatCooldown(totalSeconds: number) {
+  const safe = Math.max(0, Math.ceil(totalSeconds));
+  const minutes = Math.floor(safe / 60);
+  const seconds = safe % 60;
+  if (minutes > 0) {
+    return `${minutes}분 ${seconds.toString().padStart(2, "0")}초`;
+  }
+  return `${seconds}초`;
+}
 
 function formatReminderTime(hour: number, minute: number) {
   return `${`${hour}`.padStart(2, "0")}:${`${minute}`.padStart(2, "0")}`;
@@ -334,7 +342,6 @@ function AppShell() {
   const [resetCode, setResetCode] = useState("");
   const [resetNewPassword, setResetNewPassword] = useState("");
   const [resetNewPasswordConfirm, setResetNewPasswordConfirm] = useState("");
-  const [demoVerificationCode, setDemoVerificationCode] = useState<string | null>(null);
 
   useEffect(() => {
     async function boot() {
@@ -360,28 +367,6 @@ function AppShell() {
     return () => clearInterval(timer);
   }, [resendCooldownSeconds]);
 
-  useEffect(() => {
-    if (!isDemoMode()) {
-      setDemoVerificationCode(null);
-      return;
-    }
-    const target = authStage === "forgot_confirm" ? resetEmail : settings.email;
-    if (!target) {
-      setDemoVerificationCode(null);
-      return;
-    }
-    let cancelled = false;
-    getDemoVerificationCode(target)
-      .then((code) => {
-        if (!cancelled) setDemoVerificationCode(code);
-      })
-      .catch(() => {
-        if (!cancelled) setDemoVerificationCode(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [authStage, resetEmail, settings.email, settings.signupEmailVerificationPending, settings.emailVerified]);
 
   const latestRecord = records[0];
   const todayRecords = useMemo(() => recordsForDate(records), [records]);
@@ -446,11 +431,11 @@ function AppShell() {
 
     setAuthSubmitting(true);
     try {
-      const serverSettings = await signupRequest(name, email, password);
+      const { settings: serverSettings, nextAllowedAt } = await signupRequest(name, email, password);
       setLoginPassword("");
       setPasswordConfirm("");
       setEmailCode("");
-      setResendCooldownSeconds(0);
+      setResendCooldownSeconds(secondsUntil(nextAllowedAt));
       setAuthNotice("");
       setDraftName(serverSettings.displayName);
       setDraftEmail(serverSettings.email);
@@ -464,6 +449,8 @@ function AppShell() {
         setAuthNotice("가입이 완료되었습니다. 로그인해 주세요.");
       }
     } catch (error) {
+      const cooldownAt = error instanceof AuthError ? error.detail.nextAllowedAt : undefined;
+      if (cooldownAt) setResendCooldownSeconds(secondsUntil(cooldownAt));
       setAuthError(authErrorToMessage(error, "회원가입을 처리하지 못했습니다."));
     } finally {
       setAuthSubmitting(false);
@@ -525,17 +512,19 @@ function AppShell() {
 
     setAuthSubmitting(true);
     try {
-      await requestPasswordResetCode(email);
+      const { nextAllowedAt } = await requestPasswordResetCode(email);
+      setResendCooldownSeconds(secondsUntil(nextAllowedAt));
       setAuthStage("forgot_confirm");
-      setAuthNotice(
-        isDemoMode()
-          ? "재설정 코드가 발급되었습니다. 화면에 표시된 코드를 입력해 주세요."
-          : "재설정 코드를 이메일로 보냈습니다. 메일함을 확인해 주세요."
-      );
+      setAuthNotice("재설정 코드를 이메일로 보냈습니다. 메일함을 확인해 주세요.");
       setResetCode("");
       setResetNewPassword("");
       setResetNewPasswordConfirm("");
     } catch (error) {
+      const cooldownAt = error instanceof AuthError ? error.detail.nextAllowedAt : undefined;
+      if (cooldownAt) {
+        setResendCooldownSeconds(secondsUntil(cooldownAt));
+        setAuthStage("forgot_confirm");
+      }
       setAuthError(authErrorToMessage(error, "재설정 코드를 보내지 못했습니다."));
     } finally {
       setAuthSubmitting(false);
@@ -603,6 +592,11 @@ function AppShell() {
     return fallback;
   }
 
+  function secondsUntil(timestamp: number | undefined): number {
+    if (!timestamp) return 0;
+    return Math.max(0, Math.ceil((timestamp - Date.now()) / 1000));
+  }
+
   async function confirmEmailCode() {
     const code = emailCode.trim();
 
@@ -630,15 +624,15 @@ function AppShell() {
 
     setResendSubmitting(true);
     try {
-      await resendVerification(settings.authToken, settings.email);
-      setResendCooldownSeconds(60);
+      const { nextAllowedAt } = await resendVerification(settings.authToken, settings.email);
+      setResendCooldownSeconds(secondsUntil(nextAllowedAt));
       Alert.alert(
         "인증 코드를 다시 보냈어요",
-        isDemoMode()
-          ? "데모 환경에서는 화면에 표시된 코드만 유효합니다."
-          : "이메일을 확인해 주세요. 메일이 보이지 않으면 스팸 메일함도 확인해 주세요."
+        "이메일을 확인해 주세요. 메일이 보이지 않으면 스팸 메일함도 확인해 주세요."
       );
     } catch (error) {
+      const cooldownAt = error instanceof AuthError ? error.detail.nextAllowedAt : undefined;
+      if (cooldownAt) setResendCooldownSeconds(secondsUntil(cooldownAt));
       Alert.alert("재전송 실패", error instanceof Error ? error.message : "인증 코드를 다시 만들지 못했습니다.");
     } finally {
       setResendSubmitting(false);
@@ -843,7 +837,6 @@ function AppShell() {
                 setNewPasswordConfirm={setResetNewPasswordConfirm}
                 notice={authNotice}
                 error={authError}
-                demoCode={demoVerificationCode}
                 onSubmit={submitForgotConfirm}
                 onBack={() => {
                   setAuthStage("forgot_request");
@@ -903,7 +896,6 @@ function AppShell() {
               verifySubmitting={verifySubmitting}
               resendSubmitting={resendSubmitting}
               resendCooldownSeconds={resendCooldownSeconds}
-              demoCode={demoVerificationCode}
             />
           </ScrollView>
         </KeyboardAvoidingView>
@@ -1237,7 +1229,6 @@ function ForgotPasswordConfirmScreen({
   setNewPasswordConfirm,
   notice,
   error,
-  demoCode,
   onSubmit,
   onBack,
   submitting
@@ -1251,7 +1242,6 @@ function ForgotPasswordConfirmScreen({
   setNewPasswordConfirm: (value: string) => void;
   notice: string;
   error: string;
-  demoCode: string | null;
   onSubmit: () => void;
   onBack: () => void;
   submitting: boolean;
@@ -1263,16 +1253,6 @@ function ForgotPasswordConfirmScreen({
       </View>
       <Text style={styles.authTitle}>새 비밀번호 설정</Text>
       <Text style={styles.authSubtitle}>{email} 계정의 비밀번호를 새로 만들어 주세요.</Text>
-
-      {demoCode ? (
-        <View style={styles.demoNoticeCard}>
-          <Text style={styles.demoNoticeTitle}>데모 환경 안내</Text>
-          <Text style={styles.demoNoticeText}>
-            인증 서버가 연결되지 않은 데모 빌드입니다. 실제 메일은 발송되지 않으며, 아래 코드를 입력해 주세요.
-          </Text>
-          <Text style={styles.demoNoticeCode}>{demoCode}</Text>
-        </View>
-      ) : null}
 
       <View style={styles.authCard}>
         {notice ? (
@@ -1416,8 +1396,7 @@ function VerifyEmailScreen({
   onLogout,
   verifySubmitting,
   resendSubmitting,
-  resendCooldownSeconds,
-  demoCode
+  resendCooldownSeconds
 }: {
   email: string;
   code: string;
@@ -1428,7 +1407,6 @@ function VerifyEmailScreen({
   verifySubmitting: boolean;
   resendSubmitting: boolean;
   resendCooldownSeconds: number;
-  demoCode: string | null;
 }) {
   const resendDisabled = resendSubmitting || resendCooldownSeconds > 0;
 
@@ -1439,21 +1417,8 @@ function VerifyEmailScreen({
       </View>
       <Text style={styles.authTitle}>이메일 인증</Text>
       <Text style={styles.authSubtitle}>
-        {email} 계정을 보호하기 위해 6자리 인증 코드 확인이 필요합니다.
+        {email}로 6자리 인증 코드를 보냈습니다. 메일이 도착하지 않으면 스팸 메일함도 확인해 주세요.
       </Text>
-
-      {demoCode ? (
-        <View style={styles.demoNoticeCard}>
-          <Text style={styles.demoNoticeTitle}>데모 환경 안내</Text>
-          <Text style={styles.demoNoticeText}>
-            인증 서버가 연결되지 않은 데모 빌드입니다. 실제 메일은 발송되지 않으며, 아래 코드를 그대로 입력해 주세요.
-          </Text>
-          <Text style={styles.demoNoticeCode}>{demoCode}</Text>
-          <Text style={styles.demoNoticeText}>
-            정식 배포에서는 이메일로 받은 6자리 코드만 통과합니다. 임의 코드 입력은 거부됩니다.
-          </Text>
-        </View>
-      ) : null}
 
       <View style={styles.authCard}>
         <Text style={styles.authCardTitle}>인증 코드 입력</Text>
@@ -1470,9 +1435,7 @@ function VerifyEmailScreen({
           />
         </View>
         <Text style={styles.authRuleText}>
-          {demoCode
-            ? "위에 표시된 데모 코드를 그대로 입력하면 인증이 완료됩니다."
-            : "이메일로 받은 6자리 코드를 입력해 주세요. 5회 이상 틀리면 코드가 무효화됩니다."}
+          이메일로 받은 6자리 코드를 입력해 주세요. 5회 이상 틀리면 코드가 무효화되며 다시 받으셔야 합니다.
         </Text>
         <Pressable
           accessibilityRole="button"
@@ -1498,7 +1461,7 @@ function VerifyEmailScreen({
             {resendSubmitting
               ? "재발송 중"
               : resendCooldownSeconds > 0
-                ? `${resendCooldownSeconds}초 후 다시 발송`
+                ? `${formatCooldown(resendCooldownSeconds)} 후 다시 보낼 수 있습니다`
                 : "인증 코드 다시 받기"}
           </Text>
         </Pressable>

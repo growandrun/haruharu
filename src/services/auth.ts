@@ -1,14 +1,4 @@
 import type { SubscriptionTier, UserSettings } from "../types/app";
-import {
-  DemoAccountError,
-  completePasswordReset as demoCompletePasswordReset,
-  getPendingVerificationCode as demoGetPendingCode,
-  loginAccount as demoLoginAccount,
-  regenerateVerificationCode as demoRegenerateCode,
-  signupAccount as demoSignupAccount,
-  startPasswordReset as demoStartPasswordReset,
-  verifyAccountEmail as demoVerifyAccountEmail
-} from "./demoAccounts";
 
 type AuthUser = {
   id: string;
@@ -26,6 +16,12 @@ type AuthUser = {
 type AuthResponse = {
   token?: string;
   user?: AuthUser;
+  email?: string;
+  name?: string;
+  ok?: boolean;
+  nextAllowedAt?: number;
+  remaining?: number;
+  lockedMinutes?: number;
   error?: string;
   message?: string;
 };
@@ -34,37 +30,37 @@ const runtimeEnv = (globalThis as unknown as {
   process?: { env?: Record<string, string | undefined> };
 }).process?.env;
 
-const AI_ENDPOINT = runtimeEnv?.EXPO_PUBLIC_AI_ENDPOINT;
 const AUTH_BASE_URL = getAuthBaseUrl();
-const DEMO_TOKEN = "demo-token";
 
 export class AuthError extends Error {
   code: string;
-  detail?: { remaining?: number; lockedMinutes?: number };
+  detail: { remaining?: number; lockedMinutes?: number; nextAllowedAt?: number; email?: string };
 
-  constructor(code: string, message: string, detail?: { remaining?: number; lockedMinutes?: number }) {
+  constructor(
+    code: string,
+    message: string,
+    detail?: { remaining?: number; lockedMinutes?: number; nextAllowedAt?: number; email?: string }
+  ) {
     super(message);
     this.code = code;
-    this.detail = detail;
+    this.detail = detail ?? {};
   }
 }
+
+export type SignupResult = {
+  settings: UserSettings;
+  nextAllowedAt: number;
+};
+
+export type ResendResult = {
+  nextAllowedAt: number;
+};
 
 export function hasAuthServer() {
   return Boolean(AUTH_BASE_URL);
 }
 
-export function isDemoMode() {
-  return !AUTH_BASE_URL;
-}
-
-export async function getDemoVerificationCode(email: string): Promise<string | null> {
-  if (!isDemoMode()) return null;
-  const normalized = normalizeEmailLocal(email);
-  if (!normalized) return null;
-  return demoGetPendingCode(normalized);
-}
-
-export async function signup(name: string, email: string, password: string): Promise<UserSettings> {
+export async function signup(name: string, email: string, password: string): Promise<SignupResult> {
   const trimmedName = sanitizeName(name);
   const trimmedEmail = normalizeEmailLocal(email);
   if (!trimmedName) {
@@ -77,35 +73,16 @@ export async function signup(name: string, email: string, password: string): Pro
   if (passwordIssue) {
     throw new AuthError("invalid_password_format", passwordIssue);
   }
-
   if (!AUTH_BASE_URL) {
-    try {
-      const account = await demoSignupAccount(trimmedName, trimmedEmail, password);
-      return demoPendingSettings(account);
-    } catch (error) {
-      throw mapDemoError(error);
-    }
+    throw new AuthError("server_required", "인증 서버가 연결되지 않았습니다.");
   }
 
-  await authRequest("/auth/signup", { name: trimmedName, email: trimmedEmail, password });
+  const payload = await authRequest("/auth/signup", { name: trimmedName, email: trimmedEmail, password });
+  const nextAllowedAt = payload.nextAllowedAt ?? Date.now() + 3 * 60 * 1000;
+
   return {
-    tier: "free",
-    isLoggedIn: true,
-    userId: undefined,
-    authToken: undefined,
-    emailVerified: false,
-    signupEmailVerificationPending: true,
-    paymentStatus: "none",
-    pendingTier: undefined,
-    depositorName: "",
-    paymentRequestedAt: undefined,
-    paymentApprovedAt: undefined,
-    reminderHour: 22,
-    reminderMinute: 0,
-    summaryReminderEnabled: false,
-    privacyMode: true,
-    displayName: trimmedName,
-    email: trimmedEmail
+    settings: pendingVerificationSettings(trimmedName, trimmedEmail),
+    nextAllowedAt
   };
 }
 
@@ -117,14 +94,8 @@ export async function login(email: string, password: string): Promise<UserSettin
   if (!password) {
     throw new AuthError("missing_password", "비밀번호를 입력해 주세요.");
   }
-
   if (!AUTH_BASE_URL) {
-    try {
-      const account = await demoLoginAccount(trimmedEmail, password);
-      return demoVerifiedSettingsFromAccount(account);
-    } catch (error) {
-      throw mapDemoError(error);
-    }
+    throw new AuthError("server_required", "인증 서버가 연결되지 않았습니다.");
   }
 
   const payload = await authRequest("/auth/login", { email: trimmedEmail, password });
@@ -132,7 +103,7 @@ export async function login(email: string, password: string): Promise<UserSettin
 }
 
 export async function logout(token?: string) {
-  if (!token || !AUTH_BASE_URL || token === DEMO_TOKEN) return;
+  if (!token || !AUTH_BASE_URL) return;
   await fetch(`${AUTH_BASE_URL}/auth/logout`, {
     method: "POST",
     headers: {
@@ -143,67 +114,46 @@ export async function logout(token?: string) {
 
 export async function verifyEmail(token: string | undefined, code: string, email?: string): Promise<UserSettings> {
   const trimmedCode = code.trim();
-  if (!trimmedCode) {
-    throw new AuthError("missing_code", "인증 코드를 입력해 주세요.");
+  if (!/^\d{6}$/.test(trimmedCode)) {
+    throw new AuthError("invalid_code_format", "6자리 숫자 코드를 입력해 주세요.");
   }
   const trimmedEmail = email ? normalizeEmailLocal(email) : "";
-
-  if (!AUTH_BASE_URL || token === DEMO_TOKEN) {
-    if (!trimmedEmail) {
-      throw new AuthError("missing_email", "이메일이 누락되었습니다. 회원가입을 다시 진행해 주세요.");
-    }
-    try {
-      const account = await demoVerifyAccountEmail(trimmedEmail, trimmedCode);
-      return demoVerifiedSettingsFromAccount(account);
-    } catch (error) {
-      throw mapDemoError(error);
-    }
+  if (!AUTH_BASE_URL) {
+    throw new AuthError("server_required", "인증 서버가 연결되지 않았습니다.");
   }
 
   const payload = token
-    ? await authRequest("/auth/verify-email", { code: trimmedCode }, token)
+    ? await authRequest("/auth/verify-email", { code: trimmedCode, email: trimmedEmail }, token)
     : await authRequest("/auth/verify-email", { code: trimmedCode, email: trimmedEmail });
   return settingsFromAuth(payload);
 }
 
-export async function resendVerification(token: string | undefined, email?: string) {
+export async function resendVerification(token: string | undefined, email?: string): Promise<ResendResult> {
   const trimmedEmail = email ? normalizeEmailLocal(email) : "";
-
-  if (!AUTH_BASE_URL || token === DEMO_TOKEN) {
-    if (!trimmedEmail) {
-      throw new AuthError("missing_email", "이메일이 누락되었습니다. 회원가입을 다시 진행해 주세요.");
-    }
-    try {
-      await demoRegenerateCode(trimmedEmail, "signup");
-    } catch (error) {
-      throw mapDemoError(error);
-    }
-    return;
+  if (!trimmedEmail) {
+    throw new AuthError("missing_email", "이메일이 누락되었습니다.");
+  }
+  if (!AUTH_BASE_URL) {
+    throw new AuthError("server_required", "인증 서버가 연결되지 않았습니다.");
   }
 
-  if (token) {
-    await authRequest("/auth/resend-verification", { email: trimmedEmail }, token);
-  } else {
-    await authRequest("/auth/resend-verification", { email: trimmedEmail });
-  }
+  const payload = token
+    ? await authRequest("/auth/resend", { email: trimmedEmail }, token)
+    : await authRequest("/auth/resend", { email: trimmedEmail });
+  return { nextAllowedAt: payload.nextAllowedAt ?? Date.now() + 3 * 60 * 1000 };
 }
 
-export async function requestPasswordReset(email: string): Promise<void> {
+export async function requestPasswordReset(email: string): Promise<ResendResult> {
   const trimmedEmail = normalizeEmailLocal(email);
   if (!trimmedEmail) {
     throw new AuthError("invalid_email", "올바른 이메일 주소를 입력해 주세요.");
   }
-
   if (!AUTH_BASE_URL) {
-    try {
-      await demoStartPasswordReset(trimmedEmail);
-    } catch (error) {
-      throw mapDemoError(error);
-    }
-    return;
+    throw new AuthError("server_required", "인증 서버가 연결되지 않았습니다.");
   }
 
-  await authRequest("/auth/password-reset/request", { email: trimmedEmail });
+  const payload = await authRequest("/auth/forgot-request", { email: trimmedEmail });
+  return { nextAllowedAt: payload.nextAllowedAt ?? Date.now() + 3 * 60 * 1000 };
 }
 
 export async function confirmPasswordReset(email: string, code: string, newPassword: string): Promise<UserSettings> {
@@ -219,17 +169,11 @@ export async function confirmPasswordReset(email: string, code: string, newPassw
   if (passwordIssue) {
     throw new AuthError("invalid_password_format", passwordIssue);
   }
-
   if (!AUTH_BASE_URL) {
-    try {
-      const account = await demoCompletePasswordReset(trimmedEmail, trimmedCode, newPassword);
-      return demoVerifiedSettingsFromAccount(account);
-    } catch (error) {
-      throw mapDemoError(error);
-    }
+    throw new AuthError("server_required", "인증 서버가 연결되지 않았습니다.");
   }
 
-  const payload = await authRequest("/auth/password-reset/confirm", {
+  const payload = await authRequest("/auth/forgot-confirm", {
     email: trimmedEmail,
     code: trimmedCode,
     newPassword
@@ -238,7 +182,7 @@ export async function confirmPasswordReset(email: string, code: string, newPassw
 }
 
 export async function requestPayment(token: string, tier: SubscriptionTier, depositorName: string): Promise<UserSettings> {
-  if (!AUTH_BASE_URL || token === DEMO_TOKEN) {
+  if (!AUTH_BASE_URL) {
     throw new AuthError("server_required", "결제 신청은 인증 서버가 연결된 환경에서만 가능합니다.");
   }
   const payload = await authRequest("/payments/request", { tier, depositorName }, token);
@@ -250,18 +194,34 @@ async function authRequest(path: string, body: unknown, token?: string): Promise
     throw new AuthError("server_required", "인증 서버 주소가 설정되지 않았습니다.");
   }
 
-  const response = await fetch(`${AUTH_BASE_URL}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
-    },
-    body: JSON.stringify(body)
-  });
-  const payload = (await response.json().catch(() => ({}))) as AuthResponse;
+  let response: Response;
+  try {
+    response = await fetch(`${AUTH_BASE_URL}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(body)
+    });
+  } catch (error) {
+    throw new AuthError("network_error", "네트워크 연결을 확인해 주세요.");
+  }
+
+  let payload: AuthResponse = {};
+  try {
+    payload = (await response.json()) as AuthResponse;
+  } catch {
+    payload = {};
+  }
 
   if (!response.ok) {
-    throw new AuthError(payload.error ?? "request_failed", payload.message ?? authErrorMessage(payload.error));
+    throw new AuthError(payload.error ?? "request_failed", payload.message ?? authErrorMessage(payload.error), {
+      remaining: payload.remaining,
+      lockedMinutes: payload.lockedMinutes,
+      nextAllowedAt: payload.nextAllowedAt,
+      email: payload.email
+    });
   }
 
   return payload;
@@ -304,12 +264,12 @@ function settingsFromUser(user?: AuthUser): UserSettings {
   };
 }
 
-function demoPendingSettings(account: { id: string; name: string; email: string }): UserSettings {
+function pendingVerificationSettings(name: string, email: string): UserSettings {
   return {
     tier: "free",
     isLoggedIn: true,
-    userId: account.id,
-    authToken: DEMO_TOKEN,
+    userId: undefined,
+    authToken: undefined,
     emailVerified: false,
     signupEmailVerificationPending: true,
     paymentStatus: "none",
@@ -321,44 +281,9 @@ function demoPendingSettings(account: { id: string; name: string; email: string 
     reminderMinute: 0,
     summaryReminderEnabled: false,
     privacyMode: true,
-    displayName: account.name,
-    email: account.email
+    displayName: name,
+    email
   };
-}
-
-function demoVerifiedSettingsFromAccount(account: { id: string; name: string; email: string }): UserSettings {
-  return {
-    tier: "free",
-    isLoggedIn: true,
-    userId: account.id,
-    authToken: DEMO_TOKEN,
-    emailVerified: true,
-    signupEmailVerificationPending: false,
-    paymentStatus: "none",
-    pendingTier: undefined,
-    depositorName: "",
-    paymentRequestedAt: undefined,
-    paymentApprovedAt: undefined,
-    reminderHour: 22,
-    reminderMinute: 0,
-    summaryReminderEnabled: false,
-    privacyMode: true,
-    displayName: account.name,
-    email: account.email
-  };
-}
-
-function mapDemoError(error: unknown): AuthError {
-  if (error instanceof DemoAccountError) {
-    return new AuthError(error.code, error.message, {
-      remaining: error.remaining,
-      lockedMinutes: error.lockedMinutes
-    });
-  }
-  if (error instanceof Error) {
-    return new AuthError("unknown", error.message);
-  }
-  return new AuthError("unknown", "요청을 처리하지 못했습니다.");
 }
 
 function sanitizeName(value: string): string {
@@ -397,17 +322,29 @@ function authErrorMessage(error?: string) {
     case "invalid_credentials":
       return "이메일 또는 비밀번호가 맞지 않습니다.";
     case "too_many_attempts":
+    case "too_many_attempts_email":
       return "시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.";
-    case "invalid_admin_approval":
-      return "관리자 승인 코드가 맞지 않습니다.";
-    case "email_verification_required":
+    case "email_not_found":
+      return "등록되지 않은 이메일입니다.";
+    case "invalid_password":
+      return "비밀번호가 일치하지 않습니다.";
+    case "account_locked":
+      return "계정이 일시적으로 잠겼습니다.";
+    case "email_not_verified":
       return "이메일 인증이 필요합니다.";
-    case "email_verification_expired":
-      return "이메일 인증 코드가 만료되었습니다. 코드를 다시 받아주세요.";
+    case "verification_expired":
+      return "인증 코드가 만료되었습니다.";
     case "verification_attempts_exceeded":
-      return "인증 시도 횟수를 초과했습니다. 코드를 다시 받아주세요.";
+      return "인증 시도 횟수를 초과했습니다.";
+    case "invalid_code":
     case "invalid_email_verification_code":
-      return "이메일 인증 코드가 맞지 않습니다.";
+      return "인증 코드가 맞지 않습니다.";
+    case "cooldown_active":
+      return "잠시 후 다시 시도해 주세요.";
+    case "email_send_failed":
+      return "메일 발송에 실패했습니다.";
+    case "email_unavailable":
+      return "이메일 발송 서비스가 설정되지 않았습니다.";
     case "daily_free_limit_reached":
       return "무료 플랜의 오늘 AI 분석 한도를 모두 사용했습니다.";
     default:
@@ -417,16 +354,21 @@ function authErrorMessage(error?: string) {
 
 function getAuthBaseUrl() {
   const explicitEndpoint = runtimeEnv?.EXPO_PUBLIC_AUTH_ENDPOINT;
-  if (explicitEndpoint) return explicitEndpoint;
+  if (explicitEndpoint) return explicitEndpoint.replace(/\/$/, "");
 
-  const location = (globalThis as unknown as { location?: { protocol?: string; hostname?: string } }).location;
+  const location = (globalThis as unknown as {
+    location?: { protocol?: string; hostname?: string; host?: string };
+  }).location;
   const hostname = location?.hostname;
-  if (location?.protocol?.startsWith("http") && hostname) {
+  const protocol = location?.protocol;
+  const host = location?.host;
+
+  if (protocol?.startsWith("http") && hostname && host) {
     if (hostname === "localhost" || hostname === "127.0.0.1") {
-      return `${location.protocol}//${hostname}:8787`;
+      return `${protocol}//${hostname}:8787`;
     }
-    return "";
+    return `${protocol}//${host}/api`;
   }
 
-  return AI_ENDPOINT?.replace(/\/analyze-day$/, "") ?? "";
+  return "";
 }
