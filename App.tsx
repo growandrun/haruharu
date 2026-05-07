@@ -333,6 +333,7 @@ function AppShell() {
   const [authNotice, setAuthNotice] = useState("");
   const [authError, setAuthError] = useState("");
   const [verifySubmitting, setVerifySubmitting] = useState(false);
+  const [verifyCodeError, setVerifyCodeError] = useState("");
   const [resendSubmitting, setResendSubmitting] = useState(false);
   const [resendCooldownSeconds, setResendCooldownSeconds] = useState(0);
   const [checkoutTier, setCheckoutTier] = useState<SubscriptionTier | null>(null);
@@ -605,15 +606,15 @@ function AppShell() {
       return;
     }
 
+    setVerifyCodeError("");
     setVerifySubmitting(true);
     try {
       const serverSettings = await verifyEmail(settings.authToken, code, settings.email);
       await updateSettings({ ...mergeServerSettings(serverSettings), signupEmailVerificationPending: false });
       setEmailCode("");
       setResendCooldownSeconds(0);
-      Alert.alert("이메일 인증 완료", "이제 하루정리를 사용할 수 있습니다.");
     } catch (error) {
-      Alert.alert("인증 실패", error instanceof Error ? error.message : "이메일 인증을 처리하지 못했습니다.");
+      setVerifyCodeError(error instanceof Error ? error.message : "이메일 인증을 처리하지 못했습니다.");
     } finally {
       setVerifySubmitting(false);
     }
@@ -889,11 +890,12 @@ function AppShell() {
             <VerifyEmailScreen
               email={settings.email}
               code={emailCode}
-              setCode={setEmailCode}
+              setCode={(v) => { setEmailCode(v); setVerifyCodeError(""); }}
               onVerify={confirmEmailCode}
               onResend={resendEmailCode}
               onLogout={logout}
               verifySubmitting={verifySubmitting}
+              codeError={verifyCodeError}
               resendSubmitting={resendSubmitting}
               resendCooldownSeconds={resendCooldownSeconds}
             />
@@ -1395,6 +1397,7 @@ function VerifyEmailScreen({
   onResend,
   onLogout,
   verifySubmitting,
+  codeError,
   resendSubmitting,
   resendCooldownSeconds
 }: {
@@ -1405,6 +1408,7 @@ function VerifyEmailScreen({
   onResend: () => void;
   onLogout: () => void;
   verifySubmitting: boolean;
+  codeError: string;
   resendSubmitting: boolean;
   resendCooldownSeconds: number;
 }) {
@@ -1434,9 +1438,13 @@ function VerifyEmailScreen({
             style={styles.authInput}
           />
         </View>
-        <Text style={styles.authRuleText}>
-          이메일로 받은 6자리 코드를 입력해 주세요. 5회 이상 틀리면 코드가 무효화되며 다시 받으셔야 합니다.
-        </Text>
+        {codeError ? (
+          <Text style={styles.authErrorText}>{codeError}</Text>
+        ) : (
+          <Text style={styles.authRuleText}>
+            이메일로 받은 6자리 코드를 입력해 주세요. 5회 이상 틀리면 코드가 무효화되며 다시 받으셔야 합니다.
+          </Text>
+        )}
         <Pressable
           accessibilityRole="button"
           disabled={verifySubmitting}
