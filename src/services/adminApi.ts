@@ -35,19 +35,10 @@ export type PendingPayment = {
   paymentRequestedAt: string | null;
 };
 
-function getBase(): string {
-  const loc = (globalThis as unknown as { location?: { protocol?: string; host?: string; hostname?: string } }).location;
-  if (loc?.protocol?.startsWith("http") && loc.host) {
-    if (loc.hostname === "localhost" || loc.hostname === "127.0.0.1") {
-      return `${loc.protocol}//${loc.hostname}:8787/api`;
-    }
-    return `${loc.protocol}//${loc.host}/api`;
-  }
-  return "";
-}
+import { getApiBase } from "../lib/apiBase";
 
 async function req<T>(method: "GET" | "POST", path: string, secret: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${getBase()}${path}`, {
+  const res = await fetch(`${getApiBase()}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${secret}`,

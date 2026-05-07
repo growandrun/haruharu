@@ -1,18 +1,11 @@
 import type { DayRecord } from "../types/app";
-
-function getBase(): string {
-  const loc = (globalThis as unknown as { location?: { protocol?: string; host?: string; hostname?: string } }).location;
-  if (loc?.protocol?.startsWith("http") && loc.host) {
-    if (loc.hostname === "localhost" || loc.hostname === "127.0.0.1") {
-      return `${loc.protocol}//${loc.hostname}:8787/api`;
-    }
-    return `${loc.protocol}//${loc.host}/api`;
-  }
-  return "";
-}
+import { getApiBase } from "../lib/apiBase";
 
 async function apiFetch<T>(method: "GET" | "POST", path: string, token: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${getBase()}${path}`, {
+  const base = getApiBase();
+  if (!base) throw new Error("API base URL을 확인할 수 없습니다.");
+
+  const res = await fetch(`${base}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,

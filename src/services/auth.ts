@@ -26,11 +26,9 @@ type AuthResponse = {
   message?: string;
 };
 
-const runtimeEnv = (globalThis as unknown as {
-  process?: { env?: Record<string, string | undefined> };
-}).process?.env;
+import { getApiBase } from "../lib/apiBase";
 
-const AUTH_BASE_URL = getAuthBaseUrl();
+const AUTH_BASE_URL = getApiBase();
 
 export class AuthError extends Error {
   code: string;
@@ -352,23 +350,3 @@ function authErrorMessage(error?: string) {
   }
 }
 
-function getAuthBaseUrl() {
-  const explicitEndpoint = runtimeEnv?.EXPO_PUBLIC_AUTH_ENDPOINT;
-  if (explicitEndpoint) return explicitEndpoint.replace(/\/$/, "");
-
-  const location = (globalThis as unknown as {
-    location?: { protocol?: string; hostname?: string; host?: string };
-  }).location;
-  const hostname = location?.hostname;
-  const protocol = location?.protocol;
-  const host = location?.host;
-
-  if (protocol?.startsWith("http") && hostname && host) {
-    if (hostname === "localhost" || hostname === "127.0.0.1") {
-      return `${protocol}//${hostname}:8787`;
-    }
-    return `${protocol}//${host}/api`;
-  }
-
-  return "";
-}
