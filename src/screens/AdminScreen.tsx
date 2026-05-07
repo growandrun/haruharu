@@ -91,8 +91,8 @@ export function AdminScreen() {
     );
   }
 
-  const maxSignups = Math.max(...(stats?.chart.map((r) => r.signups) ?? [1]), 1);
-  const maxLogins = Math.max(...(stats?.chart.map((r) => r.logins) ?? [1]), 1);
+  const maxSignups = Math.max(...(stats?.chart.map((r) => r.signups) ?? [0]), 1);
+  const maxLogins = Math.max(...(stats?.chart.map((r) => r.logins) ?? [0]), 1);
 
   return (
     <ScrollView style={s.page} contentContainerStyle={s.pageContent}>
@@ -114,26 +114,27 @@ export function AdminScreen() {
 
       {/* 요약 카드 */}
       <View style={s.statsRow}>
-        <StatCard icon={<Users size={20} color="#0EA5A4" />} label="전체 회원" value={stats?.totalUsers ?? 0} />
-        <StatCard icon={<TrendingUp size={20} color="#F5B84B" />} label="오늘 가입" value={stats?.todaySignups ?? 0} />
-        <StatCard icon={<UserCheck size={20} color="#4F8BFF" />} label="주간 가입" value={stats?.weekSignups ?? 0} />
-        <StatCard icon={<LogIn size={20} color="#7C6FE8" />} label="주간 로그인" value={stats?.weekLogins ?? 0} />
+        <StatCard icon={<Users size={20} color="#0EA5A4" />} label="전체 회원" value={stats?.totalUsers ?? 0} color="#E6FAF7" />
+        <StatCard icon={<UserCheck size={20} color="#16A34A" />} label="인증 완료" value={stats?.verifiedUsers ?? 0} color="#DCFCE7" />
+        <StatCard icon={<TrendingUp size={20} color="#F5B84B" />} label="오늘 가입" value={stats?.todaySignups ?? 0} color="#FFF4D7" />
+        <StatCard icon={<TrendingUp size={20} color="#4F8BFF" />} label="주간 가입" value={stats?.weekSignups ?? 0} color="#E8F0FF" />
+        <StatCard icon={<LogIn size={20} color="#7C6FE8" />} label="주간 로그인" value={stats?.weekLogins ?? 0} color="#EEECFF" />
       </View>
 
-      {/* 7일 가입 추이 */}
+      {/* 7일 추이 차트 */}
       <View style={s.section}>
         <Text style={s.sectionTitle}>최근 7일 가입 / 로그인</Text>
         <View style={s.chart}>
           {stats?.chart.map((row) => {
-            const signupH = Math.max(4, Math.round((row.signups / maxSignups) * 80));
-            const loginH = Math.max(4, Math.round((row.logins / maxLogins) * 80));
+            const signupH = Math.round((row.signups / maxSignups) * 80);
+            const loginH = Math.round((row.logins / maxLogins) * 80);
             const dateLabel = row.date.slice(5);
             return (
               <View key={row.date} style={s.chartCol}>
                 <Text style={s.chartVal}>{row.signups}</Text>
                 <View style={s.bars}>
-                  <View style={[s.bar, s.barSignup, { height: signupH }]} />
-                  <View style={[s.bar, s.barLogin, { height: loginH }]} />
+                  <View style={[s.bar, s.barSignup, { height: Math.max(3, signupH) }]} />
+                  <View style={[s.bar, s.barLogin, { height: Math.max(3, loginH) }]} />
                 </View>
                 <Text style={s.chartLabel}>{dateLabel}</Text>
               </View>
@@ -146,35 +147,29 @@ export function AdminScreen() {
         </View>
       </View>
 
-      {/* 최근 가입자 */}
+      {/* 회원 목록 */}
       <View style={s.section}>
-        <Text style={s.sectionTitle}>최근 가입자 (최대 30명)</Text>
+        <Text style={s.sectionTitle}>회원 목록 (최신순 최대 50명)</Text>
         <View style={s.tableHead}>
-          <Text style={[s.tableCell, s.cellEmail]}>이메일</Text>
-          <Text style={[s.tableCell, s.cellName]}>이름</Text>
-          <Text style={[s.tableCell, s.cellStatus]}>인증</Text>
-          <Text style={[s.tableCell, s.cellTier]}>플랜</Text>
+          <Text style={[s.th, s.colEmail]}>이메일</Text>
+          <Text style={[s.th, s.colName]}>이름</Text>
+          <Text style={[s.th, s.colStatus]}>인증</Text>
+          <Text style={[s.th, s.colTier]}>플랜</Text>
+          <Text style={[s.th, s.colDate]}>가입일</Text>
         </View>
         {users.length === 0
-          ? <Text style={s.emptyText}>가입자가 없습니다.</Text>
+          ? <Text style={s.emptyText}>회원이 없습니다.</Text>
           : users.map((u, i) => (
-            <View key={i} style={[s.tableRow, i % 2 === 0 && s.tableRowEven]}>
-              <Text style={[s.tableCell, s.cellEmail]} numberOfLines={1}>{u.email}</Text>
-              <Text style={[s.tableCell, s.cellName]} numberOfLines={1}>{u.name || "—"}</Text>
-              <View style={[s.tableCell, s.cellStatus]}>
-                <View style={[s.badge, u.emailVerified ? s.badgeGreen : s.badgeGray]}>
-                  <Text style={[s.badgeText, u.emailVerified ? s.badgeTextGreen : s.badgeTextGray]}>
-                    {u.emailVerified ? "완료" : "미인증"}
-                  </Text>
-                </View>
+            <View key={i} style={[s.tableRow, i % 2 === 1 && s.tableRowAlt]}>
+              <Text style={[s.td, s.colEmail]} numberOfLines={1}>{u.email}</Text>
+              <Text style={[s.td, s.colName]} numberOfLines={1}>{u.name || "—"}</Text>
+              <View style={[s.colStatus, s.tdCenter]}>
+                <Badge label={u.emailVerified ? "완료" : "미인증"} variant={u.emailVerified ? "green" : "gray"} />
               </View>
-              <View style={[s.tableCell, s.cellTier]}>
-                <View style={[s.badge, u.tier === "pro" ? s.badgeBlue : s.badgeGray]}>
-                  <Text style={[s.badgeText, u.tier === "pro" ? s.badgeTextBlue : s.badgeTextGray]}>
-                    {u.tier === "pro" ? "PRO" : "무료"}
-                  </Text>
-                </View>
+              <View style={[s.colTier, s.tdCenter]}>
+                <Badge label={u.tier === "pro" ? "PRO" : "무료"} variant={u.tier === "pro" ? "blue" : "gray"} />
               </View>
+              <Text style={[s.td, s.colDate]}>{u.createdAt ? u.createdAt.slice(0, 10) : "—"}</Text>
             </View>
           ))
         }
@@ -183,12 +178,22 @@ export function AdminScreen() {
   );
 }
 
-function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
+function StatCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: number; color: string }) {
   return (
-    <View style={s.statCard}>
+    <View style={[s.statCard, { backgroundColor: color }]}>
       {icon}
       <Text style={s.statValue}>{value.toLocaleString()}</Text>
       <Text style={s.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function Badge({ label, variant }: { label: string; variant: "green" | "gray" | "blue" }) {
+  const bg = variant === "green" ? "#DCFCE7" : variant === "blue" ? "#EEF2FF" : "#F3F4F6";
+  const fg = variant === "green" ? "#16A34A" : variant === "blue" ? "#4F46E5" : "#6B7280";
+  return (
+    <View style={[s.badge, { backgroundColor: bg }]}>
+      <Text style={[s.badgeText, { color: fg }]}>{label}</Text>
     </View>
   );
 }
@@ -206,21 +211,21 @@ const s = StyleSheet.create({
   pressed: { opacity: 0.75 },
   disabled: { opacity: 0.5 },
   page: { flex: 1, backgroundColor: "#F5F8FA" },
-  pageContent: { padding: 20, paddingBottom: 40, maxWidth: 900, width: "100%", alignSelf: "center" },
+  pageContent: { padding: 20, paddingBottom: 48, maxWidth: 960, width: "100%", alignSelf: "center" },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 },
   headerLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
   headerTitle: { fontSize: 20, fontWeight: "700", color: "#111827" },
   refreshBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "#E6FAF7", borderRadius: 8 },
   refreshText: { fontSize: 13, color: "#0EA5A4", fontWeight: "600" },
   errorBanner: { backgroundColor: "#FEF2F2", color: "#EF4444", padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 13 },
-  statsRow: { flexDirection: "row", flexWrap: "wrap", gap: 12, marginBottom: 20 },
-  statCard: { flex: 1, minWidth: 130, backgroundColor: "#FFFFFF", borderRadius: 12, padding: 16, alignItems: "center", gap: 6, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2 },
+  statsRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 20 },
+  statCard: { flex: 1, minWidth: 120, borderRadius: 12, padding: 14, alignItems: "center", gap: 5 },
   statValue: { fontSize: 28, fontWeight: "800", color: "#111827" },
-  statLabel: { fontSize: 12, color: "#64707D", textAlign: "center" },
+  statLabel: { fontSize: 11, color: "#64707D", textAlign: "center" },
   section: { backgroundColor: "#FFFFFF", borderRadius: 12, padding: 16, marginBottom: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2 },
   sectionTitle: { fontSize: 15, fontWeight: "700", color: "#111827", marginBottom: 16 },
   chart: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", height: 110, marginBottom: 8 },
-  chartCol: { flex: 1, alignItems: "center", gap: 4 },
+  chartCol: { flex: 1, alignItems: "center", gap: 2 },
   chartVal: { fontSize: 11, color: "#64707D" },
   bars: { flexDirection: "row", alignItems: "flex-end", gap: 2 },
   bar: { width: 10, borderRadius: 3 },
@@ -231,21 +236,18 @@ const s = StyleSheet.create({
   legendItem: { flexDirection: "row", alignItems: "center", gap: 4 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
   legendText: { fontSize: 12, color: "#64707D" },
-  tableHead: { flexDirection: "row", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#E4EAF0", marginBottom: 4 },
-  tableRow: { flexDirection: "row", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#F3F4F6" },
-  tableRowEven: { backgroundColor: "#F9FAFB" },
-  tableCell: { fontSize: 13, color: "#374151", justifyContent: "center" },
-  cellEmail: { flex: 3, fontFamily: "monospace" },
-  cellName: { flex: 2 },
-  cellStatus: { flex: 1.2, alignItems: "flex-start" },
-  cellTier: { flex: 1, alignItems: "flex-start" },
+  tableHead: { flexDirection: "row", paddingBottom: 8, borderBottomWidth: 1.5, borderBottomColor: "#E4EAF0", marginBottom: 2 },
+  th: { fontSize: 12, fontWeight: "700", color: "#64707D", textTransform: "uppercase" },
+  tableRow: { flexDirection: "row", paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: "#F3F4F6", alignItems: "center" },
+  tableRowAlt: { backgroundColor: "#F9FAFB" },
+  td: { fontSize: 13, color: "#374151" },
+  tdCenter: { alignItems: "flex-start", justifyContent: "center" },
+  colEmail: { flex: 3 },
+  colName: { flex: 2 },
+  colStatus: { flex: 1.2 },
+  colTier: { flex: 1 },
+  colDate: { flex: 1.5, fontSize: 12, color: "#6B7280" },
   badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 20 },
-  badgeGreen: { backgroundColor: "#DCFCE7" },
-  badgeGray: { backgroundColor: "#F3F4F6" },
-  badgeBlue: { backgroundColor: "#EEF2FF" },
   badgeText: { fontSize: 11, fontWeight: "600" },
-  badgeTextGreen: { color: "#16A34A" },
-  badgeTextGray: { color: "#6B7280" },
-  badgeTextBlue: { color: "#4F46E5" },
-  emptyText: { fontSize: 14, color: "#98A2AD", textAlign: "center", paddingVertical: 20 }
+  emptyText: { fontSize: 14, color: "#98A2AD", textAlign: "center", paddingVertical: 24 }
 });

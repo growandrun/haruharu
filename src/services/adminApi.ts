@@ -1,12 +1,12 @@
 export type AdminStats = {
   totalUsers: number;
+  verifiedUsers: number;
   todaySignups: number;
   weekSignups: number;
   weekLogins: number;
   chart: Array<{
     date: string;
     signups: number;
-    verifications: number;
     logins: number;
   }>;
 };
