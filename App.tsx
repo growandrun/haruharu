@@ -55,6 +55,7 @@ import {
 } from "./src/services/auth";
 import { cancelDailySummaryReminder, scheduleDailySummaryReminder } from "./src/services/notifications";
 import { loadRecords, loadSettings, resetLocalData, saveRecords, saveSettings } from "./src/services/storage";
+import { fetchCloudRecords, saveCloudRecords, syncCloudRecords } from "./src/services/cloudRecords";
 import { defaultSettings } from "./src/data/sample";
 import { colors, spacing } from "./src/theme/colors";
 import type { DayRecord, Expense, Mood, SubscriptionTier, TabKey, Todo, UserSettings } from "./src/types/app";
@@ -347,8 +348,22 @@ function AppShell() {
 
   useEffect(() => {
     async function boot() {
-      const [loadedRecords, loadedSettings] = await Promise.all([loadRecords(), loadSettings()]);
-      setRecords(loadedRecords);
+      const [localRecords, loadedSettings] = await Promise.all([loadRecords(), loadSettings()]);
+
+      let finalRecords = localRecords;
+
+      if (loadedSettings.isLoggedIn && loadedSettings.authToken) {
+        try {
+          // 로그인 상태면 서버 기록과 병합 (로컬 기록 업로드 + 서버 기록 다운로드)
+          const merged = await syncCloudRecords(loadedSettings.authToken, localRecords);
+          finalRecords = merged;
+          await saveRecords(merged);
+        } catch {
+          // 서버 동기화 실패 시 로컬 기록으로 계속 사용
+        }
+      }
+
+      setRecords(finalRecords);
       setSettings(loadedSettings);
       setDraftName(loadedSettings.displayName);
       setDraftEmail(loadedSettings.email);
@@ -392,6 +407,9 @@ function AppShell() {
   async function updateRecords(nextRecords: DayRecord[]) {
     setRecords(nextRecords);
     await saveRecords(nextRecords);
+    if (settings.isLoggedIn && settings.authToken) {
+      saveCloudRecords(settings.authToken, nextRecords).catch(() => {});
+    }
   }
 
   async function updateSettings(nextSettings: UserSettings) {
@@ -487,6 +505,15 @@ function AppShell() {
       setEmailCode("");
       setResendCooldownSeconds(0);
       await updateSettings(nextSettings);
+      // 로그인 성공 시 서버 기록과 병합
+      if (nextSettings.authToken) {
+        try {
+          const currentLocal = await loadRecords();
+          const merged = await syncCloudRecords(nextSettings.authToken, currentLocal);
+          setRecords(merged);
+          await saveRecords(merged);
+        } catch { /* 동기화 실패 시 로컬 유지 */ }
+      }
     } catch (error) {
       if (error instanceof AuthError && error.code === "email_not_verified") {
         setAuthError(error.message);
@@ -572,6 +599,9 @@ function AppShell() {
       userId: undefined,
       signupEmailVerificationPending: false
     });
+    // 로그아웃 시 로컬 기록 초기화 (다른 계정이 이전 기록을 볼 수 없도록)
+    setRecords([]);
+    await saveRecords([]);
     setLoginName("");
     setLoginEmail("");
     setLoginPassword("");
@@ -611,9 +641,19 @@ function AppShell() {
     setVerifySubmitting(true);
     try {
       const serverSettings = await verifyEmail(settings.authToken, code, settings.email);
-      await updateSettings({ ...mergeServerSettings(serverSettings), signupEmailVerificationPending: false });
+      const nextSettings = { ...mergeServerSettings(serverSettings), signupEmailVerificationPending: false };
+      await updateSettings(nextSettings);
       setEmailCode("");
       setResendCooldownSeconds(0);
+      // 이메일 인증 완료 시 서버 기록 동기화
+      if (nextSettings.authToken) {
+        try {
+          const currentLocal = await loadRecords();
+          const merged = await syncCloudRecords(nextSettings.authToken, currentLocal);
+          setRecords(merged);
+          await saveRecords(merged);
+        } catch { /* 동기화 실패 시 로컬 유지 */ }
+      }
     } catch (error) {
       setVerifyCodeError(error instanceof Error ? error.message : "이메일 인증을 처리하지 못했습니다.");
     } finally {
