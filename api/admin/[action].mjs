@@ -1,9 +1,24 @@
-import { handleAdminStats, handleAdminUsers } from "../../lib/server/admin-handlers.mjs";
+import {
+  handleAdminStats,
+  handleAdminUsers,
+  handleAdminGetUser,
+  handleAdminUpdateUser,
+  handleAdminDeleteUser,
+  handleAdminPayments,
+  handleAdminApprovePayment,
+  handleAdminRejectPayment
+} from "../../lib/server/admin-handlers.mjs";
 import { applySecurityHeaders, applyCors } from "../../lib/server/http.mjs";
 
 const routes = {
-  stats: { method: "GET", handler: handleAdminStats },
-  users: { method: "GET", handler: handleAdminUsers }
+  stats:            { method: "GET",  handler: handleAdminStats },
+  users:            { method: "GET",  handler: handleAdminUsers },
+  "get-user":       { method: "POST", handler: handleAdminGetUser },
+  "update-user":    { method: "POST", handler: handleAdminUpdateUser },
+  "delete-user":    { method: "POST", handler: handleAdminDeleteUser },
+  payments:         { method: "GET",  handler: handleAdminPayments },
+  "approve-payment":{ method: "POST", handler: handleAdminApprovePayment },
+  "reject-payment": { method: "POST", handler: handleAdminRejectPayment }
 };
 
 export default async function handler(req, res) {
