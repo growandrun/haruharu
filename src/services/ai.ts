@@ -20,7 +20,7 @@ export async function analyzeDay(text: string, history: DayRecord[], authToken?:
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
+    const timeout = setTimeout(() => controller.abort(), 28000);
     const response = await fetch(AI_ENDPOINT, {
       method: "POST",
       headers: {
@@ -85,9 +85,11 @@ function aiErrorMessage(error?: string) {
 
 function getAiEndpoint() {
   const location = (globalThis as unknown as { location?: { protocol?: string; hostname?: string } }).location;
+  // 웹 환경: 같은 오리진의 Vercel 서버리스 함수 호출 (dev/prod 공통)
   if (location?.protocol?.startsWith("http") && location.hostname) {
-    return `${location.protocol}//${location.hostname}:8787/analyze-day`;
+    return "/api/analyze-day";
   }
 
+  // 네이티브 앱 환경: 환경변수로 지정된 전체 URL 사용
   return runtimeEnv?.EXPO_PUBLIC_AI_ENDPOINT;
 }
