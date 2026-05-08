@@ -52,7 +52,7 @@ export async function analyzeDay(text: string, history: DayRecord[], authToken?:
       const protectedMessages = [
         "로그인이 필요합니다.",
         "이메일 인증이 필요합니다.",
-        "무료 플랜의 오늘 AI 분석 한도를 모두 사용했습니다.",
+        "AI 분석 한도를 모두 사용했습니다.",
         "AI 분석을 사용할 수 없습니다."
       ];
       if (protectedMessages.includes(error.message)) {
@@ -77,7 +77,7 @@ function aiErrorMessage(error?: string) {
     case "email_verification_required":
       return "이메일 인증이 필요합니다.";
     case "daily_free_limit_reached":
-      return "무료 플랜의 오늘 AI 분석 한도를 모두 사용했습니다.";
+      return "AI 분석 한도를 모두 사용했습니다.";
     default:
       return "AI 분석을 사용할 수 없습니다.";
   }

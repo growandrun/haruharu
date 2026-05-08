@@ -12,10 +12,15 @@ const anthropic = new Anthropic({
 
 /** 티어별 하루 AI 분석 허용 횟수 */
 const DAILY_LIMITS = {
-  free: 3,
-  plus: 20,
-  premium: 60
+  plus: 3,
+  premium: 10
 };
+
+/**
+ * 무료 플랜은 계정 생성 이후 평생 딱 1회만 허용.
+ * Redis 키가 이미 존재하면 한도 초과로 처리합니다.
+ */
+const FREE_LIFETIME_LIMIT = 1;
 
 /**
  * 시스템 프롬프트 — cache_control 적용해 반복 호출 비용 절감.
@@ -82,20 +87,29 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "email_verification_required" });
   }
 
-  // ── 2. 티어별 일일 횟수 제한 ──────────────────────────────────
+  // ── 2. 티어별 횟수 제한 ───────────────────────────────────────
   const tier = auth.account.tier ?? "free";
-  const dailyLimit = DAILY_LIMITS[tier] ?? DAILY_LIMITS.free;
   const today = todayKey();
-  const rlKey = `ai:analyze:${auth.account.id}:${today}`;
 
-  if (!(await consumeRateLimit(rlKey, 86400, dailyLimit))) {
-    return res.status(429).json({
-      error: "daily_free_limit_reached",
-      message:
-        tier === "free"
-          ? "무료 플랜의 오늘 AI 분석 한도를 모두 사용했습니다."
-          : "오늘 AI 분석 한도를 모두 사용했습니다."
-    });
+  if (tier === "free") {
+    // 무료: 계정 전체 평생 1회 (일자 무관, TTL 없는 영구 키)
+    const lifetimeKey = `ai:analyze:lifetime:${auth.account.id}`;
+    if (!(await consumeRateLimit(lifetimeKey, 60 * 60 * 24 * 36500, FREE_LIFETIME_LIMIT))) {
+      return res.status(429).json({
+        error: "daily_free_limit_reached",
+        message: "무료 플랜은 AI 분석을 1회만 체험할 수 있습니다. 플러스 또는 프리미엄으로 업그레이드하세요."
+      });
+    }
+  } else {
+    // 유료: 티어별 일일 한도
+    const dailyLimit = DAILY_LIMITS[tier] ?? DAILY_LIMITS.plus;
+    const rlKey = `ai:analyze:${auth.account.id}:${today}`;
+    if (!(await consumeRateLimit(rlKey, 86400, dailyLimit))) {
+      return res.status(429).json({
+        error: "daily_free_limit_reached",
+        message: "오늘 AI 분석 한도를 모두 사용했습니다. 내일 다시 이용해 주세요."
+      });
+    }
   }
 
   // ── 3. 입력 검증 ──────────────────────────────────────────────
