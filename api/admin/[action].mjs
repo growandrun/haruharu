@@ -6,7 +6,8 @@ import {
   handleAdminDeleteUser,
   handleAdminPayments,
   handleAdminApprovePayment,
-  handleAdminRejectPayment
+  handleAdminRejectPayment,
+  handleAdminForceLogout
 } from "../../lib/server/admin-handlers.mjs";
 import { applySecurityHeaders, applyCors } from "../../lib/server/http.mjs";
 
@@ -18,7 +19,8 @@ const routes = {
   "delete-user":    { method: "POST", handler: handleAdminDeleteUser },
   payments:         { method: "GET",  handler: handleAdminPayments },
   "approve-payment":{ method: "POST", handler: handleAdminApprovePayment },
-  "reject-payment": { method: "POST", handler: handleAdminRejectPayment }
+  "reject-payment": { method: "POST", handler: handleAdminRejectPayment },
+  "force-logout":   { method: "POST", handler: handleAdminForceLogout }
 };
 
 export default async function handler(req, res) {

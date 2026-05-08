@@ -338,6 +338,7 @@ function AppShell() {
   const [verifyCodeError, setVerifyCodeError] = useState("");
   const [resendSubmitting, setResendSubmitting] = useState(false);
   const [resendCooldownSeconds, setResendCooldownSeconds] = useState(0);
+  const [cloudSaveError, setCloudSaveError] = useState("");
   const [checkoutTier, setCheckoutTier] = useState<SubscriptionTier | null>(null);
   const [depositorName, setDepositorName] = useState("");
   const [emailCode, setEmailCode] = useState("");
@@ -408,7 +409,10 @@ function AppShell() {
     setRecords(nextRecords);
     await saveRecords(nextRecords);
     if (settings.isLoggedIn && settings.authToken) {
-      saveCloudRecords(settings.authToken, nextRecords).catch(() => {});
+      saveCloudRecords(settings.authToken, nextRecords).catch(() => {
+        setCloudSaveError("서버 저장에 실패했습니다. 기록은 이 기기에 저장되어 있습니다.");
+        setTimeout(() => setCloudSaveError(""), 5000);
+      });
     }
   }
 
@@ -952,6 +956,11 @@ function AppShell() {
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.keyboard}>
         <View style={styles.app}>
           <Header settings={settings} />
+          {cloudSaveError ? (
+            <View style={styles.syncErrBanner}>
+              <Text style={styles.syncErrTxt}>{cloudSaveError}</Text>
+            </View>
+          ) : null}
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             {checkoutTier ? (
               <CheckoutScreen
@@ -2325,6 +2334,18 @@ const styles = StyleSheet.create({
   app: {
     flex: 1,
     backgroundColor: colors.page
+  },
+  syncErrBanner: {
+    backgroundColor: "#FEF2F2",
+    borderBottomWidth: 1,
+    borderBottomColor: "#FECACA",
+    paddingHorizontal: 16,
+    paddingVertical: 8
+  },
+  syncErrTxt: {
+    fontSize: 12,
+    color: "#DC2626",
+    textAlign: "center"
   },
   authContent: {
     flexGrow: 1,

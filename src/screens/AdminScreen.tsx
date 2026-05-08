@@ -14,6 +14,7 @@ import { ShieldCheck, RefreshCw, Users, TrendingUp, LogIn, UserCheck, CreditCard
 import {
   fetchAdminStats, fetchAdminUsers, fetchAdminUpdateUser, fetchAdminDeleteUser,
   fetchAdminPayments, fetchAdminApprovePayment, fetchAdminRejectPayment,
+  fetchAdminForceLogout,
   type AdminStats, type AdminUser, type PendingPayment
 } from "../services/adminApi";
 
@@ -251,7 +252,9 @@ function UserEditModal({ user, secret, onClose, onSaved, onDeleted }: {
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
+  const [forcingLogout, setForcingLogout] = useState(false);
   const [errMsg, setErrMsg] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
 
   async function save() {
     setSaving(true); setErrMsg("");
@@ -279,6 +282,16 @@ function UserEditModal({ user, secret, onClose, onSaved, onDeleted }: {
     } catch (e) { setErrMsg(e instanceof Error ? e.message : "삭제 실패"); setDeleting(false); }
   }
 
+  async function forceLogout() {
+    setForcingLogout(true); setErrMsg(""); setSuccessMsg("");
+    try {
+      const res = await fetchAdminForceLogout(secret, user.email);
+      setSuccessMsg(`세션 ${res.sessionsDeleted}개를 만료했습니다.`);
+      setTimeout(() => setSuccessMsg(""), 4000);
+    } catch (e) { setErrMsg(e instanceof Error ? e.message : "세션 만료 실패"); }
+    finally { setForcingLogout(false); }
+  }
+
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <View style={s.overlay}>
@@ -298,6 +311,7 @@ function UserEditModal({ user, secret, onClose, onSaved, onDeleted }: {
             </View>
 
             {errMsg ? <Text style={s.errText}>{errMsg}</Text> : null}
+            {successMsg ? <Text style={s.successText}>{successMsg}</Text> : null}
 
             {/* Name */}
             <Text style={s.fieldLabel}>이름</Text>
@@ -344,6 +358,14 @@ function UserEditModal({ user, secret, onClose, onSaved, onDeleted }: {
             {/* Danger zone */}
             <View style={s.danger}>
               <Text style={s.dangerTitle}>위험 구역</Text>
+
+              {/* Force logout */}
+              <Pressable onPress={forceLogout} disabled={forcingLogout}
+                style={({ pressed }) => [s.forceLogoutBtn, pressed && s.pressed, forcingLogout && s.dimmed]}>
+                {forcingLogout ? <ActivityIndicator size="small" color="#D97706" /> : <Lock size={14} color="#D97706" />}
+                <Text style={s.forceLogoutTxt}>세션 강제 만료 (즉시 로그아웃)</Text>
+              </Pressable>
+
               {!confirmDelete ? (
                 <Pressable onPress={() => setConfirmDelete(true)}
                   style={({ pressed }) => [s.deleteBtn, pressed && s.pressed]}>
@@ -584,5 +606,8 @@ const s = StyleSheet.create({
   cancelBtn: { flex: 1, height: 36, borderRadius: 8, borderWidth: 1, borderColor: "#E4EAF0", alignItems: "center", justifyContent: "center" },
   cancelBtnTxt: { fontSize: 13, color: "#64707D" },
   confirmDeleteBtn: { flex: 1, height: 36, borderRadius: 8, backgroundColor: "#EF4444", alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 4 },
-  confirmDeleteTxt: { fontSize: 13, color: "#fff", fontWeight: "700" }
+  confirmDeleteTxt: { fontSize: 13, color: "#fff", fontWeight: "700" },
+  forceLogoutBtn: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: "#FDE68A", backgroundColor: "#FFFBEB", paddingHorizontal: 14, paddingVertical: 9, borderRadius: 8, marginBottom: 8 },
+  forceLogoutTxt: { fontSize: 13, color: "#D97706", fontWeight: "600" },
+  successText: { fontSize: 13, color: "#16A34A", marginBottom: 6, textAlign: "center" }
 });

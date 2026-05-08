@@ -63,3 +63,4 @@ export const fetchAdminDeleteUser = (s: string, email: string) => req<{ ok: bool
 export const fetchAdminPayments = (s: string) => req<{ payments: PendingPayment[] }>("GET", "/admin/payments", s);
 export const fetchAdminApprovePayment = (s: string, email: string) => req<{ ok: boolean }>("POST", "/admin/approve-payment", s, { email });
 export const fetchAdminRejectPayment = (s: string, email: string) => req<{ ok: boolean }>("POST", "/admin/reject-payment", s, { email });
+export const fetchAdminForceLogout = (s: string, email: string) => req<{ ok: boolean; sessionsDeleted: number }>("POST", "/admin/force-logout", s, { email });
